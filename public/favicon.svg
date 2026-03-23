@@ -1,21 +1,9 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="DripCraft icon">
-  <defs>
-    <radialGradient id="outer" cx="30%" cy="25%" r="80%">
-      <stop offset="0%" stop-color="#2a2a2a"/>
-      <stop offset="100%" stop-color="#111111"/>
-    </radialGradient>
-    <radialGradient id="inner" cx="35%" cy="28%" r="80%">
-      <stop offset="0%" stop-color="#231808"/>
-      <stop offset="100%" stop-color="#120a02"/>
-    </radialGradient>
-  </defs>
-  <circle cx="32" cy="32" r="31" fill="url(#outer)"/>
-  <circle cx="32" cy="32" r="23" fill="url(#inner)" stroke="#3a2810" stroke-width="1"/>
-  <path d="M32 12C32 12 18 26 18 35C18 42.2 23.8 48 31 48C38.2 48 44 42.2 44 35C44 26 32 12 32 12Z" fill="#2a1408" stroke="#c8873a" stroke-width="1.8"/>
-  <path d="M32 18C32 18 23 29 23 35C23 40.2 27.2 44 32 44C36.8 44 41 40.2 41 35C41 29 32 18 32 18Z" fill="#1a0c04"/>
-  <circle cx="32" cy="29" r="1.8" fill="#c8873a"/>
-  <line x1="32" y1="29" x2="28" y2="35" stroke="#c8873a" stroke-width="1" opacity="0.7"/>
-  <line x1="32" y1="29" x2="36" y2="35" stroke="#c8873a" stroke-width="1" opacity="0.7"/>
-  <circle cx="28" cy="35" r="1.3" fill="#c8873a" opacity="0.8"/>
-  <circle cx="36" cy="35" r="1.3" fill="#c8873a" opacity="0.8"/>
+  <path d="M32 5C32 5 12 24 12 39C12 50 21 59 32 59C43 59 52 50 52 39C52 24 32 5 32 5Z" fill="#2a1408" stroke="#c8873a" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M32 12C32 12 18 27 18 39C18 46.8 24.2 53 32 53C39.8 53 46 46.8 46 39C46 27 32 12 32 12Z" fill="#1a0c04"/>
+  <circle cx="32" cy="31" r="2.2" fill="#d89a44"/>
+  <line x1="32" y1="31" x2="26.5" y2="39" stroke="#d89a44" stroke-width="1.4" opacity="0.72" stroke-linecap="round"/>
+  <line x1="32" y1="31" x2="37.5" y2="39" stroke="#d89a44" stroke-width="1.4" opacity="0.72" stroke-linecap="round"/>
+  <circle cx="26.5" cy="39" r="1.7" fill="#d89a44" opacity="0.85"/>
+  <circle cx="37.5" cy="39" r="1.7" fill="#d89a44" opacity="0.85"/>
 </svg>
