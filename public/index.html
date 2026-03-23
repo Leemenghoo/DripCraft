@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <title>DripCraft — AI UI Generator</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="stylesheet" href="styles.css?v=32" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Playfair+Display:wght@700;900&family=Josefin+Sans:wght@200;300;400&display=swap"
+      rel="stylesheet"
+    />
+  </head>
+  <body>
+    <!-- Animated background orbs -->
+    <div class="bg-orbs" id="bgOrbs" aria-hidden="true"></div>
+
+    <nav class="navbar" role="navigation" aria-label="Main navigation">
+      <div
+        class="nav-logo"
+        id="navLogoHome"
+        role="button"
+        tabindex="0"
+        aria-label="Return to new chat"
+      >
+        <!-- Brand lockup (dripcraft-logo-v1) -->
+        <div class="nav-logo-lockup">
+          <div class="nav-logo-icon-wrap" aria-hidden="true">
+            <svg
+              class="nav-logo-svg"
+              width="28"
+              height="35"
+              viewBox="0 0 32 40"
+              fill="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                d="M16 2C16 2 2 16 2 26C2 33.7 8.3 40 16 40C23.7 40 30 33.7 30 26C30 16 16 2 16 2Z"
+                fill="#2a1408"
+                stroke="#c8873a"
+                stroke-width="1.5"
+              />
+              <path
+                d="M16 8C16 8 6 19 6 26C6 31.3 10.5 36 16 36C21.5 36 26 31.3 26 26C26 19 16 8 16 8Z"
+                fill="#1a0c04"
+              />
+              <ellipse
+                cx="11"
+                cy="22"
+                rx="2.5"
+                ry="3.5"
+                fill="#3a1e08"
+                opacity="0.6"
+              />
+              <circle cx="16" cy="19" r="2" fill="#c8873a" opacity="0.95" />
+              <line
+                x1="16"
+                y1="19"
+                x2="11"
+                y2="26"
+                stroke="#c8873a"
+                stroke-width="1"
+                opacity="0.6"
+              />
+              <line
+                x1="16"
+                y1="19"
+                x2="21"
+                y2="26"
+                stroke="#c8873a"
+                stroke-width="1"
+                opacity="0.6"
+              />
+              <circle cx="11" cy="26" r="1.5" fill="#c8873a" opacity="0.6" />
+              <circle cx="21" cy="26" r="1.5" fill="#c8873a" opacity="0.6" />
+              <line
+                x1="11"
+                y1="26"
+                x2="16"
+                y2="32"
+                stroke="#c8873a"
+                stroke-width="0.8"
+                opacity="0.35"
+              />
+              <line
+                x1="21"
+                y1="26"
+                x2="16"
+                y2="32"
+                stroke="#c8873a"
+                stroke-width="0.8"
+                opacity="0.35"
+              />
+              <circle cx="16" cy="32" r="1" fill="#c8873a" opacity="0.3" />
+            </svg>
+          </div>
+          <div class="nav-logo-text">
+            <span class="nav-logo-brand">DripCraft</span>
+            <span class="nav-logo-studio">Creative Studio</span>
+            <span class="nav-logo-byline">by Leemenghoo</span>
+          </div>
+        </div>
+      </div>
+      <div class="nav-actions">
+        <button
+          class="nav-btn api-source-badge api-source-badge--server"
+          id="apiSourceBadge"
+          type="button"
+          aria-label="Open API source details"
+          aria-haspopup="dialog"
+          aria-controls="apiSourceModal"
+          aria-live="polite"
+          title="Using website API"
+        >
+          Server
+        </button>
+        <button
+          class="nav-btn"
+          id="historyToggleBtn"
+          aria-label="Toggle history panel"
+          aria-expanded="false"
+          aria-controls="historySidebar"
+        >
+          <svg
+            width="15"
+            height="15"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="12" cy="12" r="10" />
+            <polyline points="12 6 12 12 16 14" />
+          </svg>
+          <span class="nav-history-label">History</span>
+        </button>
+      </div>
+    </nav>
+
+    <div class="app-wrapper">
+      <!-- History Sidebar -->
+      <aside
+        class="history-sidebar"
+        id="historySidebar"
+        role="complementary"
+        aria-label="Session history"
+        aria-hidden="true"
+      >
+        <div class="sidebar-header">
+          <h2 class="sidebar-title">Sessions</h2>
+          <button
+            class="sidebar-close-btn"
+            id="sidebarCloseBtn"
+            aria-label="Close history panel"
+          >
+            ✕
+          </button>
+        </div>
+        <div class="history-list-wrapper">
+          <ul class="history-list" id="historyList" role="list">
+            <li class="history-empty" id="historyEmpty" aria-live="polite">
+              <span class="empty-icon" aria-hidden="true">⏳</span>
+              <p>No sessions yet.<br />Start chatting first.</p>
+            </li>
+          </ul>
+        </div>
+        <button
+          class="clear-history-btn"
+          id="clearHistoryBtn"
+          aria-label="Clear all sessions"
+        >
+          Clear All
+        </button>
+      </aside>
+
+      <!-- Main: chat thread + input bar -->
+      <main class="main-content" id="mainContent">
+        <!-- Error Banner -->
+        <div
+          class="error-banner"
+          id="errorBanner"
+          role="alert"
+          aria-live="assertive"
+          hidden
+        >
+          <div class="error-content">
+            <span class="error-icon" aria-hidden="true">⚠</span>
+            <p class="error-message" id="errorMessage">
+              Something went wrong. Please try again.
+            </p>
+          </div>
+          <button class="retry-btn" id="retryBtn" aria-label="Retry generation">
+            <svg
+              width="14"
+              height="14"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              aria-hidden="true"
+            >
+              <polyline points="23 4 23 10 17 10" />
+              <path d="M20.49 15a9 9 0 11-2.12-9.36L23 10" />
+            </svg>
+            Try Again
+          </button>
+        </div>
+
+        <!-- Chat Thread -->
+        <div
+          class="chat-thread"
+          id="chatThread"
+          aria-label="Chat conversation"
+          aria-live="polite"
+        >
+          <!-- Welcome screen shown when thread is empty -->
+          <div class="chat-welcome" id="chatWelcome">
+            <div class="welcome-hero">
+              <div class="welcome-icon-wrap" aria-hidden="true">
+                <div class="welcome-icon-ring"></div>
+                <svg
+                  class="welcome-icon"
+                  viewBox="0 0 32 40"
+                  fill="none"
+                  xmlns="http://www.w3.org/2000/svg"
+                >
+                  <path
+                    d="M16 2C16 2 2 16 2 26C2 33.7 8.3 40 16 40C23.7 40 30 33.7 30 26C30 16 16 2 16 2Z"
+                    fill="#2a1408"
+                    stroke="#c8873a"
+                    stroke-width="1.5"
+                  />
+                  <path
+                    d="M16 8C16 8 6 19 6 26C6 31.3 10.5 36 16 36C21.5 36 26 31.3 26 26C26 19 16 8 16 8Z"
+                    fill="#1a0c04"
+                  />
+                  <ellipse
+                    cx="11"
+                    cy="24"
+                    rx="3"
+                    ry="4"
+                    fill="#3a1e08"
+                    opacity="0.6"
+                  />
+                  <circle
+                    cx="16"
+                    cy="20"
+                    r="1.5"
+                    fill="#c8873a"
+                    opacity="0.9"
+                  />
+                  <line
+                    x1="16"
+                    y1="20"
+                    x2="12"
+                    y2="26"
+                    stroke="#c8873a"
+                    stroke-width="0.8"
+                    opacity="0.55"
+                  />
+                  <line
+                    x1="16"
+                    y1="20"
+                    x2="20"
+                    y2="26"
+                    stroke="#c8873a"
+                    stroke-width="0.8"
+                    opacity="0.55"
+                  />
+                  <circle cx="12" cy="26" r="1" fill="#c8873a" opacity="0.6" />
+                  <circle cx="20" cy="26" r="1" fill="#c8873a" opacity="0.6" />
+                </svg>
+              </div>
+              <h1 class="welcome-title">DripCraft</h1>
+              <p class="welcome-kicker">Creative Studio</p>
+              <p class="welcome-subtitle">
+                Describe a UI component and I'll generate it for you.<br />You
+                can then keep refining it — just like a real conversation.
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <!-- Fixed Input Bar -->
+        <div class="input-bar" role="form" aria-label="Message input">
+          <div class="input-bar-inner">
+            <textarea
+              id="promptInput"
+              class="prompt-textarea"
+              placeholder="Describe a component, or ask to change something..."
+              rows="1"
+              aria-label="UI description prompt"
+            ></textarea>
+            <div class="input-bar-footer">
+              <span class="char-counter" id="charCounter" aria-live="polite"
+                >0 chars</span
+              >
+              <span class="input-hint">Ctrl + Enter</span>
+              <button
+                class="generate-btn"
+                id="generateBtn"
+                aria-label="Generate UI code"
+              >
+                <span class="btn-icon" aria-hidden="true">
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
+                    <line x1="22" y1="2" x2="11" y2="13" />
+                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                  </svg>
+                </span>
+                <span class="btn-text">Generate</span>
+                <span
+                  class="btn-loader"
+                  id="btnLoader"
+                  aria-hidden="true"
+                ></span>
+              </button>
+            </div>
+          </div>
+        </div>
+      </main>
+    </div>
+
+    <div
+      class="toast"
+      id="toast"
+      role="alert"
+      aria-live="polite"
+      aria-atomic="true"
+    ></div>
+
+    <div class="api-modal" id="apiSourceModal" hidden>
+      <div
+        class="api-modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="apiSourceModalTitle"
+      >
+        <h3 id="apiSourceModalTitle">API Source</h3>
+        <p class="api-modal-desc" id="apiSourceInfoText">
+          You are currently using the website API key.
+        </p>
+        <p class="api-source-meta" id="apiSourceMeta">
+          Tap Refresh to sync status.
+        </p>
+        <div class="api-modal-actions">
+          <button
+            class="nav-btn nav-btn--ghost"
+            id="apiSourceCloseBtn"
+            type="button"
+          >
+            Close
+          </button>
+          <button
+            class="nav-btn"
+            id="clearUserApiKeyBtn"
+            type="button"
+            hidden
+            aria-hidden="true"
+          >
+            Clear My API
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="api-modal" id="clearApiConfirmModal" hidden>
+      <div
+        class="api-modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="clearApiConfirmTitle"
+      >
+        <h3 id="clearApiConfirmTitle">Clear your API key?</h3>
+        <p class="api-modal-desc">
+          This removes your saved key from server memory immediately.
+        </p>
+        <p class="api-source-meta">
+          You can add your key again later if needed.
+        </p>
+        <div class="api-modal-actions">
+          <button
+            class="nav-btn nav-btn--ghost"
+            id="clearApiConfirmCancelBtn"
+            type="button"
+          >
+            Cancel
+          </button>
+          <button class="nav-btn" id="clearApiConfirmBtn" type="button">
+            Yes, Clear My API
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <div class="api-modal" id="apiModal" hidden>
+      <div
+        class="api-modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="apiModalTitle"
+      >
+        <h3 id="apiModalTitle">Server API limit is reached</h3>
+        <p class="api-modal-desc">
+          The server API key is currently out of quota.
+        </p>
+        <div class="api-modal-notes">
+          <p>After you enter your own API key:</p>
+          <ul>
+            <li>We validate the key and check quota first.</li>
+            <li>Your key is stored in server memory for 1 hour.</li>
+            <li>Refresh will still work, and you can clear it anytime.</li>
+          </ul>
+        </div>
+        <label class="api-modal-label" for="apiModalInput"
+          >Your Gemini API key</label
+        >
+        <input
+          id="apiModalInput"
+          class="api-modal-input"
+          type="password"
+          placeholder="AIza..."
+          autocomplete="off"
+        />
+        <div class="api-modal-actions">
+          <button
+            class="nav-btn nav-btn--ghost"
+            id="apiModalCancelBtn"
+            type="button"
+          >
+            Cancel
+          </button>
+          <button class="nav-btn" id="apiModalSubmitBtn" type="button">
+            Verify & Use Key
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <script src="script.js?v=23"></script>
+  </body>
+</html>
