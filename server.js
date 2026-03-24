@@ -5,7 +5,7 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
-const fs = require("fs");
+const { MongoClient } = require("mongodb");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const beautify = require("js-beautify");
 
@@ -20,14 +20,50 @@ const USER_KEY_TTL_MS = 60 * 60 * 1000; // 1 hour
 const USER_KEY_CLEANUP_MS = 5 * 60 * 1000; // every 5 minutes
 const SERVER_API_KEY = process.env.GEMINI_API_KEY || null;
 const PUBLIC_DIR = path.join(__dirname, "public");
-const DATA_DIR = path.join(__dirname, "data");
+const MONGODB_URI = process.env.MONGODB_URI || null;
+
+/* ═══════════════════════════════════════════════════════
+   MONGODB SETUP
+═══════════════════════════════════════════════════════ */
+let mongoClient = null;
+let db = null;
+
+async function connectToMongo() {
+  if (db) return db;
+  if (!MONGODB_URI) {
+    console.warn(
+      "[MongoDB] MONGODB_URI is not set — session history will not be persisted.",
+    );
+    return null;
+  }
+  try {
+    mongoClient = new MongoClient(MONGODB_URI);
+    await mongoClient.connect();
+    db = mongoClient.db("dripcraft");
+    // Create index for fast lookups and sorting
+    await db
+      .collection("sessions")
+      .createIndex({ id: 1 }, { unique: true });
+    await db.collection("sessions").createIndex({ updatedAt: -1 });
+    console.log("[MongoDB] Connected successfully.");
+    return db;
+  } catch (err) {
+    console.error("[MongoDB] Connection failed:", err.message);
+    return null;
+  }
+}
+
+function getSessionsCollection() {
+  if (!db) return null;
+  return db.collection("sessions");
+}
 
 /* ═══════════════════════════════════════════════════════
    EXPRESS SETUP
 ═══════════════════════════════════════════════════════ */
 const app = express();
 app.use(cors());
-app.use(express.json({ limit: "2mb" })); // sessions contain full code, so we need more room
+app.use(express.json({ limit: "2mb" }));
 app.use(
   express.static(PUBLIC_DIR, {
     etag: false,
@@ -38,20 +74,17 @@ app.use(
 /* ═══════════════════════════════════════════════════════
    GEMINI SETUP
 ═══════════════════════════════════════════════════════ */
-const modelCache = new Map(); // key: apiKey, value: Gemini model
-const userKeysByClientId = new Map(); // key: clientId, value: { apiKey, expiresAt }
+const modelCache = new Map();
+const userKeysByClientId = new Map();
 
 function getModelForApiKey(apiKey) {
   if (!apiKey) return null;
   if (modelCache.has(apiKey)) return modelCache.get(apiKey);
 
   const genAI = new GoogleGenerativeAI(apiKey);
-
   const model = genAI.getGenerativeModel({
     model: "gemini-3-flash-preview",
-    generationConfig: {
-      responseMimeType: "application/json",
-    },
+    generationConfig: { responseMimeType: "application/json" },
   });
 
   modelCache.set(apiKey, model);
@@ -101,7 +134,6 @@ function getActiveApiKeyForRequest(req) {
 async function validateApiKeyAvailability(apiKey) {
   const model = getModelForApiKey(apiKey);
   if (!model) throw new Error("API key is missing.");
-
   const result = await model.generateContent(
     'Return this exact JSON only: {"ok":true}',
   );
@@ -111,26 +143,8 @@ async function validateApiKeyAvailability(apiKey) {
 setInterval(purgeExpiredUserKeys, USER_KEY_CLEANUP_MS);
 
 /* ═══════════════════════════════════════════════════════
-  SESSION STORE  (saved to history.json)
-  Schema: [{ id, title, createdAt, updatedAt, messages: [{ role, content?, result? }] }]
+   SESSION HELPERS
 ═══════════════════════════════════════════════════════ */
-const SESSIONS_FILE = path.join(DATA_DIR, "history.json");
-const SESSIONS_BAK = path.join(DATA_DIR, "history.backup.json");
-const LEGACY_SESSIONS_FILE = path.join(__dirname, "history.json");
-const LEGACY_SESSIONS_BAK = path.join(__dirname, "history.backup.json");
-
-if (!fs.existsSync(DATA_DIR)) {
-  fs.mkdirSync(DATA_DIR, { recursive: true });
-}
-
-if (!fs.existsSync(SESSIONS_FILE) && fs.existsSync(LEGACY_SESSIONS_FILE)) {
-  fs.copyFileSync(LEGACY_SESSIONS_FILE, SESSIONS_FILE);
-}
-
-if (!fs.existsSync(SESSIONS_BAK) && fs.existsSync(LEGACY_SESSIONS_BAK)) {
-  fs.copyFileSync(LEGACY_SESSIONS_BAK, SESSIONS_BAK);
-}
-
 function normalizeSession(entry) {
   const fallbackId = Date.now() + Math.floor(Math.random() * 1000);
   const safeId = Number(entry?.id) || fallbackId;
@@ -156,96 +170,6 @@ function normalizeSession(entry) {
     messages: safeMessages,
   };
 }
-
-function readSessionsFile(filePath) {
-  if (!fs.existsSync(filePath)) return [];
-
-  const raw = fs.readFileSync(filePath, "utf8");
-  const parsed = JSON.parse(raw);
-  if (!Array.isArray(parsed)) return [];
-
-  return parsed;
-}
-
-function writeJsonAtomic(filePath, payload) {
-  const tempFile = `${filePath}.tmp`;
-  const json = JSON.stringify(payload, null, 2);
-
-  fs.writeFileSync(tempFile, json, "utf8");
-  fs.renameSync(tempFile, filePath);
-}
-
-function loadSessions() {
-  try {
-    const parsed = readSessionsFile(SESSIONS_FILE);
-
-    // Migration: old format was flat { id, prompt, result, createdAt } entries
-    if (
-      parsed.length > 0 &&
-      parsed[0].prompt !== undefined &&
-      !parsed[0].messages
-    ) {
-      console.log("[Sessions] Migrating old history format to sessions...");
-      const migrated = parsed.map((entry) =>
-        normalizeSession({
-          id: entry.id,
-          title: String(entry.prompt || "").slice(0, 80),
-          createdAt: entry.createdAt,
-          messages: [
-            { role: "user", content: entry.prompt },
-            { role: "ai", result: entry.result },
-          ],
-        }),
-      );
-      writeJsonAtomic(SESSIONS_FILE, migrated);
-      writeJsonAtomic(SESSIONS_BAK, migrated);
-      return migrated;
-    }
-
-    return parsed.map(normalizeSession);
-  } catch (err) {
-    console.warn(
-      "[Sessions] Could not load history.json, trying backup...",
-      err.message,
-    );
-    try {
-      const backup = readSessionsFile(SESSIONS_BAK).map(normalizeSession);
-      if (backup.length > 0) {
-        console.log(
-          `[Sessions] Recovered ${backup.length} session(s) from backup.`,
-        );
-        writeJsonAtomic(SESSIONS_FILE, backup);
-        return backup;
-      }
-    } catch (backupErr) {
-      console.warn(
-        "[Sessions] Could not load backup file either.",
-        backupErr.message,
-      );
-    }
-  }
-  return [];
-}
-
-function saveSessions() {
-  try {
-    const normalized = sessions.map(normalizeSession).slice(0, MAX_SESSIONS);
-
-    if (fs.existsSync(SESSIONS_FILE)) {
-      fs.copyFileSync(SESSIONS_FILE, SESSIONS_BAK);
-    }
-
-    writeJsonAtomic(SESSIONS_FILE, normalized);
-
-    if (!fs.existsSync(SESSIONS_BAK)) {
-      writeJsonAtomic(SESSIONS_BAK, normalized);
-    }
-  } catch (err) {
-    console.error("[Sessions] Could not save history.json:", err.message);
-  }
-}
-
-const sessions = loadSessions();
 
 /* ═══════════════════════════════════════════════════════
    PROMPT ENGINEERING
@@ -488,6 +412,13 @@ function formatCode({ html, css, js }) {
 }
 
 /* ═══════════════════════════════════════════════════════
+   HELPERS
+═══════════════════════════════════════════════════════ */
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/* ═══════════════════════════════════════════════════════
    ROUTES
 ═══════════════════════════════════════════════════════ */
 
@@ -590,7 +521,7 @@ app.delete("/user-key", (req, res) => {
   return res.json({ ok: true, hasUserKey: false });
 });
 
-/* Generate — unchanged interface, no longer saves to history inline */
+/* Generate */
 app.post("/generate", async (req, res) => {
   const rawPrompt = req.body?.prompt;
   const currentCode = req.body?.currentCode || null;
@@ -639,131 +570,185 @@ app.post("/generate", async (req, res) => {
   }
 });
 
-/* Sessions — save a completed session (called on New Chat) */
-app.post("/sessions", (req, res) => {
+/* Sessions — save a completed session */
+app.post("/sessions", async (req, res) => {
   const { title, messages } = req.body;
 
   if (!Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: "messages array is required." });
   }
 
-  const session = {
+  const session = normalizeSession({
     id: Date.now(),
-    title:
-      typeof title === "string" && title.trim()
-        ? title.trim().slice(0, 80)
-        : "Untitled session",
+    title,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),
     messages,
-  };
+  });
 
-  sessions.unshift(session);
-  if (sessions.length > MAX_SESSIONS) sessions.pop();
-  saveSessions();
+  const col = getSessionsCollection();
+  if (col) {
+    try {
+      // Keep only MAX_SESSIONS — delete oldest if we're at the limit
+      const count = await col.countDocuments();
+      if (count >= MAX_SESSIONS) {
+        const oldest = await col
+          .find({})
+          .sort({ updatedAt: 1 })
+          .limit(count - MAX_SESSIONS + 1)
+          .toArray();
+        const oldIds = oldest.map((s) => s.id);
+        await col.deleteMany({ id: { $in: oldIds } });
+      }
+      await col.insertOne(session);
+      console.log(
+        `[Sessions] Saved "${session.title}" (${messages.length} messages)`,
+      );
+    } catch (err) {
+      console.error("[Sessions] Could not save session:", err.message);
+    }
+  }
 
-  console.log(
-    `[Sessions] Saved session "${session.title}" (${messages.length} messages)`,
-  );
   return res.json({ id: session.id });
 });
 
 /* Sessions — list (slim, no message content) */
-app.get("/sessions", (req, res) => {
-  const slim = sessions.map(
-    ({ id, title, createdAt, updatedAt, messages }) => ({
+app.get("/sessions", async (req, res) => {
+  const col = getSessionsCollection();
+  if (!col) return res.json([]);
+
+  try {
+    const sessions = await col
+      .find({})
+      .sort({ updatedAt: -1 })
+      .limit(MAX_SESSIONS)
+      .project({ _id: 0, id: 1, title: 1, createdAt: 1, updatedAt: 1, messages: 1 })
+      .toArray();
+
+    const slim = sessions.map(({ id, title, createdAt, updatedAt, messages }) => ({
       id,
       title,
       createdAt,
       updatedAt,
-      messageCount: messages.length,
-    }),
-  );
-  res.json(slim);
+      messageCount: Array.isArray(messages) ? messages.length : 0,
+    }));
+
+    res.json(slim);
+  } catch (err) {
+    console.error("[Sessions] List error:", err.message);
+    res.json([]);
+  }
 });
 
 /* Sessions — get full session */
-app.get("/sessions/:id", (req, res) => {
+app.get("/sessions/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const session = sessions.find((s) => s.id === id);
+  const col = getSessionsCollection();
+  if (!col) return res.status(404).json({ error: "Session not found." });
 
-  if (!session) return res.status(404).json({ error: "Session not found." });
-
-  res.json(session);
+  try {
+    const session = await col.findOne({ id }, { projection: { _id: 0 } });
+    if (!session) return res.status(404).json({ error: "Session not found." });
+    res.json(session);
+  } catch (err) {
+    console.error("[Sessions] Get error:", err.message);
+    res.status(500).json({ error: "Could not retrieve session." });
+  }
 });
 
-/* Sessions — update an existing session's messages (called after every generation) */
-app.put("/sessions/:id", (req, res) => {
+/* Sessions — update an existing session's messages */
+app.put("/sessions/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const idx = sessions.findIndex((s) => s.id === id);
-
-  if (idx === -1) return res.status(404).json({ error: "Session not found." });
-
   const { messages } = req.body;
+
   if (!Array.isArray(messages) || messages.length === 0) {
     return res.status(400).json({ error: "messages array is required." });
   }
 
-  const updatedSession = {
-    ...sessions[idx],
-    messages,
-    updatedAt: new Date().toISOString(),
-  };
+  const col = getSessionsCollection();
+  if (!col) return res.status(404).json({ error: "Session not found." });
 
-  sessions.splice(idx, 1);
-  sessions.unshift(updatedSession);
-  saveSessions();
-
-  return res.json({ id });
+  try {
+    const result = await col.updateOne(
+      { id },
+      { $set: { messages, updatedAt: new Date().toISOString() } },
+    );
+    if (result.matchedCount === 0)
+      return res.status(404).json({ error: "Session not found." });
+    return res.json({ id });
+  } catch (err) {
+    console.error("[Sessions] Update error:", err.message);
+    res.status(500).json({ error: "Could not update session." });
+  }
 });
 
 /* Sessions — delete one session */
-app.delete("/sessions/:id", (req, res) => {
+app.delete("/sessions/:id", async (req, res) => {
   const id = parseInt(req.params.id, 10);
-  const idx = sessions.findIndex((s) => s.id === id);
+  const col = getSessionsCollection();
+  if (!col) return res.status(404).json({ error: "Session not found." });
 
-  if (idx === -1) return res.status(404).json({ error: "Session not found." });
-
-  sessions.splice(idx, 1);
-  saveSessions();
-
-  res.json({ message: "Session deleted." });
+  try {
+    const result = await col.deleteOne({ id });
+    if (result.deletedCount === 0)
+      return res.status(404).json({ error: "Session not found." });
+    res.json({ message: "Session deleted." });
+  } catch (err) {
+    console.error("[Sessions] Delete error:", err.message);
+    res.status(500).json({ error: "Could not delete session." });
+  }
 });
 
 /* Sessions — clear all */
-app.delete("/sessions", (req, res) => {
-  sessions.length = 0;
-  saveSessions();
+app.delete("/sessions", async (req, res) => {
+  const col = getSessionsCollection();
+  if (col) {
+    try {
+      await col.deleteMany({});
+    } catch (err) {
+      console.error("[Sessions] Clear error:", err.message);
+    }
+  }
   res.json({ message: "All sessions cleared." });
 });
 
-/* Legacy /history aliases so old bookmarks or tests don't break */
+/* Legacy /history aliases */
 app.get("/history", (req, res) => res.redirect("/sessions"));
-app.delete("/history", (req, res) => {
-  sessions.length = 0;
-  saveSessions();
+app.delete("/history", async (req, res) => {
+  const col = getSessionsCollection();
+  if (col) {
+    try {
+      await col.deleteMany({});
+    } catch (err) {
+      console.error("[Sessions] Clear error:", err.message);
+    }
+  }
   res.json({ message: "All sessions cleared." });
 });
-
-/* ═══════════════════════════════════════════════════════
-   HELPERS
-═══════════════════════════════════════════════════════ */
-function sleep(ms) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
 /* ═══════════════════════════════════════════════════════
    START SERVER
 ═══════════════════════════════════════════════════════ */
-app.listen(PORT, () => {
-  const keyStatus = SERVER_API_KEY
-    ? `✓  Configured (${SERVER_API_KEY.slice(0, 8)}...)`
-    : "✗  MISSING — add GEMINI_API_KEY to your .env file";
+async function start() {
+  await connectToMongo();
 
-  console.log("\n══════════════════════════════════════════");
-  console.log("  DripCraft — AI UI Generator");
-  console.log("══════════════════════════════════════════");
-  console.log(`  URL     : http://localhost:${PORT}`);
-  console.log(`  API Key : ${keyStatus}`);
-  console.log("══════════════════════════════════════════\n");
-});
+  app.listen(PORT, () => {
+    const keyStatus = SERVER_API_KEY
+      ? `✓  Configured (${SERVER_API_KEY.slice(0, 8)}...)`
+      : "✗  MISSING — add GEMINI_API_KEY to your .env file";
+
+    const dbStatus = db
+      ? "✓  MongoDB connected"
+      : "✗  MISSING — add MONGODB_URI to your .env file (sessions won't persist)";
+
+    console.log("\n══════════════════════════════════════════");
+    console.log("  DripCraft — AI UI Generator");
+    console.log("══════════════════════════════════════════");
+    console.log(`  URL     : http://localhost:${PORT}`);
+    console.log(`  API Key : ${keyStatus}`);
+    console.log(`  DB      : ${dbStatus}`);
+    console.log("══════════════════════════════════════════\n");
+  });
+}
+
+start();
