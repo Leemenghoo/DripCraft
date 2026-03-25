@@ -8,6 +8,7 @@
 /* ── DOM References ── */
 const promptInput = document.getElementById("promptInput");
 const generateBtn = document.getElementById("generateBtn");
+const newChatBtn = document.getElementById("newChatBtn");
 const charCounter = document.getElementById("charCounter");
 const chatThread = document.getElementById("chatThread");
 const chatWelcome = document.getElementById("chatWelcome");
@@ -197,6 +198,7 @@ let toastTimer = null;
 let cardCounter = 0;
 let lastPrompt = "";
 let currentSessionId = null; // server-assigned ID for the active session
+let generationController = null; // for cancelling pending generations
 let apiSourcePollTimer = null;
 let currentApiSource = { source: "unknown", expiresAt: null };
 
@@ -233,6 +235,7 @@ async function apiFetch(url, options = {}) {
   return fetch(url, {
     ...options,
     headers,
+    signal: options.signal || null,
   });
 }
 
@@ -278,6 +281,7 @@ async function handleGenerate() {
   if (!mainContent.classList.contains("has-messages")) {
     mainContent.classList.add("has-messages");
     if (chatWelcome) chatWelcome.style.display = "none";
+    updateNewChatBtn();
   }
 
   // Append user bubble immediately
@@ -289,14 +293,15 @@ async function handleGenerate() {
   charCounter.textContent = "0 chars";
   promptInput.style.height = "auto";
 
+  // Abort any existing generation
+  if (generationController) generationController.abort();
+  generationController = new AbortController();
+
   // Show thinking indicator
   const thinkingEl = appendThinkingCard();
 
   try {
-    const result = await postGenerate(prompt);
-
-    // Remove thinking card
-    thinkingEl.remove();
+    const result = await postGenerate(prompt, generationController.signal);
 
     // Update context state
     generated = result;
@@ -313,20 +318,27 @@ async function handleGenerate() {
     const isFollowUp = chatHistory.length > 1;
     showToast(isFollowUp ? "Component updated!" : "UI generated!", "success");
   } catch (err) {
+    if (err.name === "AbortError") {
+      return; // Exit silently
+    }
     thinkingEl.remove();
     if (err.requireUserKey || err.code === "SERVER_KEYS_EXHAUSTED") {
       openApiModal();
     }
     showError(err.message || "Generation failed. Please try again.");
   } finally {
-    setLoading(false);
+    if (generationController && !generationController.signal.aborted) {
+      thinkingEl.remove();
+      setLoading(false);
+      generationController = null;
+    }
   }
 }
 
 /* ═══════════════════════════════════════════════════════
    API CALLS
 ═══════════════════════════════════════════════════════ */
-async function postGenerate(prompt) {
+async function postGenerate(prompt, signal) {
   const hasExistingCode = generated.html || generated.css;
 
   const body = {
@@ -339,6 +351,7 @@ async function postGenerate(prompt) {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
+    signal,
   });
 
   const data = await res.json().catch(() => ({}));
@@ -823,28 +836,20 @@ function escapeHTML(str) {
 }
 
 /* ═══════════════════════════════════════════════════════
-   NEW CHAT
+   NEW CHAT & MODALS
 ═══════════════════════════════════════════════════════ */
-if (navLogoHome) {
-  navLogoHome.addEventListener("click", () => {
-    if (historySidebar.classList.contains("open")) closeSidebar();
-    resetChat();
-    showToast("Returned to new chat.", "info");
-  });
-
-  navLogoHome.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") {
-      e.preventDefault();
-      navLogoHome.click();
-    }
-  });
-}
 
 function resetChat() {
   // Clear thread and return to welcome/centered layout
   chatThread.querySelectorAll(".chat-message").forEach((el) => el.remove());
   if (chatWelcome) chatWelcome.style.display = "";
   mainContent.classList.remove("has-messages");
+
+  // Abort any active generation
+  if (generationController) {
+    generationController.abort();
+    generationController = null;
+  }
 
   // Reset state
   chatMessages = [];
@@ -864,7 +869,19 @@ function resetChat() {
   promptInput.style.height = "auto";
 
   hideError();
+  updateNewChatBtn();
   promptInput.focus();
+}
+
+/* ── UI HELPERS ── */
+function updateNewChatBtn() {
+  if (!newChatBtn) return;
+  const hasMessages = mainContent.classList.contains("has-messages");
+  newChatBtn.hidden = !hasMessages;
+}
+
+if (newChatBtn) {
+  newChatBtn.addEventListener("click", resetChat);
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -966,6 +983,7 @@ async function restoreSession(id) {
 
     if (chatWelcome) chatWelcome.style.display = "none";
     mainContent.classList.add("has-messages");
+    updateNewChatBtn();
     await loadSessionList();
 
     showToast("Session restored!", "success");
@@ -1068,7 +1086,8 @@ function restoreFromLocalStorage() {
       }
       chatMessages.push(msg);
     });
-
+    
+    updateNewChatBtn();
     return true;
   } catch {
     clearLocalStorage();
